@@ -1,3 +1,6 @@
+SHELL := /bin/bash
+PATH := /usr/local/go/bin:$(PATH)
+
 .PHONY: help build test lint clean run dev
 
 BINARY     = verion
