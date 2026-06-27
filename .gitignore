@@ -1,0 +1,36 @@
+# Binaries
+bin/
+dist/
+*.exe
+*.out
+
+# Go
+*.test
+*.prof
+vendor/
+
+# Environment
+.env
+.env.*
+*.local
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+tmp/
+
+# Secrets — never commit these
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
