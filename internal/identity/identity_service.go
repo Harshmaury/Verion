@@ -158,7 +158,6 @@ func (s *identityService) CreateIdentity(ctx context.Context, input CreateIdenti
 	// Step 8 — Write audit event.
 	if err := s.repos.Audit.Insert(ctx, &AuditEvent{
 		TenantID:   input.TenantID,
-		EventType:  AuditEventIdentityCreated,
 		EntityType: "identity",
 		EntityID:   created.ID,
 		ActorID:    input.CreatedBy,

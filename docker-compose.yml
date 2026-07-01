@@ -1,0 +1,66 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verion — Local Development Infrastructure
+# Services: PostgreSQL 16 + Redis 7
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  verion-net:
+    driver: bridge
+
+volumes:
+  verion-postgres-data:
+    driver: local
+  verion-redis-data:
+    driver: local
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: verion-postgres
+    restart: unless-stopped
+    networks:
+      - verion-net
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB:       verion
+      POSTGRES_USER:     verion
+      POSTGRES_PASSWORD: verion_dev_secret
+    volumes:
+      - verion-postgres-data:/var/lib/postgresql/data
+      - ./deployments/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verion -d verion"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: verion-redis
+    restart: unless-stopped
+    networks:
+      - verion-net
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass verion_redis_secret
+    volumes:
+      - verion-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "verion_redis_secret", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
