@@ -1,0 +1,39 @@
+syntax = "proto3";
+package verion.v1;
+option go_package = "github.com/Harshmaury/verion/api/gen/go/verion/v1;verionv1";
+
+import "verion/v1/types.proto";
+
+service KeyService {
+  rpc GenerateKey (GenerateKeyRequest) returns (GenerateKeyResponse);
+  rpc GetKey      (GetKeyRequest)      returns (GetKeyResponse);
+  rpc ListKeys    (ListKeysRequest)    returns (ListKeysResponse);
+  rpc RotateKey   (RotateKeyRequest)   returns (RotateKeyResponse);
+  rpc RevokeKey   (RevokeKeyRequest)   returns (RevokeKeyResponse);
+}
+
+message GenerateKeyRequest {
+  string     tenant_id   = 1;
+  string     identity_id = 2;
+  KeyType    key_type    = 3;
+  KeyPurpose purpose     = 4;
+  string     actor_id    = 5;
+}
+message GenerateKeyResponse { IdentityKey key = 1; }
+
+message GetKeyRequest  { string tenant_id = 1; string key_id = 2; }
+message GetKeyResponse { IdentityKey key = 1; }
+
+message ListKeysRequest  { string tenant_id = 1; string identity_id = 2; }
+message ListKeysResponse { repeated IdentityKey keys = 1; }
+
+message RotateKeyRequest {
+  string tenant_id   = 1;
+  string identity_id = 2;
+  string key_id      = 3;
+  string actor_id    = 4;
+}
+message RotateKeyResponse { IdentityKey new_key = 1; }
+
+message RevokeKeyRequest  { string tenant_id = 1; string key_id = 2; string actor_id = 3; }
+message RevokeKeyResponse {}

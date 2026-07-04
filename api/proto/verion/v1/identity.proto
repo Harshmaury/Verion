@@ -1,0 +1,87 @@
+syntax = "proto3";
+package verion.v1;
+option go_package = "github.com/Harshmaury/verion/api/gen/go/verion/v1;verionv1";
+
+import "verion/v1/types.proto";
+import "google/protobuf/timestamp.proto";
+
+service IdentityService {
+  rpc CreateTenant   (CreateTenantRequest)   returns (CreateTenantResponse);
+  rpc GetTenant      (GetTenantRequest)      returns (GetTenantResponse);
+  rpc SuspendTenant  (SuspendTenantRequest)  returns (SuspendTenantResponse);
+  rpc ActivateTenant (ActivateTenantRequest) returns (ActivateTenantResponse);
+
+  rpc CreateIdentity      (CreateIdentityRequest)      returns (CreateIdentityResponse);
+  rpc GetIdentity         (GetIdentityRequest)         returns (GetIdentityResponse);
+  rpc GetIdentityByHandle (GetIdentityByHandleRequest) returns (GetIdentityResponse);
+  rpc ListIdentities      (ListIdentitiesRequest)      returns (ListIdentitiesResponse);
+  rpc UpdateIdentity      (UpdateIdentityRequest)      returns (UpdateIdentityResponse);
+  rpc SuspendIdentity     (SuspendIdentityRequest)     returns (SuspendIdentityResponse);
+  rpc ReactivateIdentity  (ReactivateIdentityRequest)  returns (ReactivateIdentityResponse);
+  rpc DeactivateIdentity  (DeactivateIdentityRequest)  returns (DeactivateIdentityResponse);
+}
+
+message CreateTenantRequest {
+  string     name        = 1;
+  string     slug        = 2;
+  TenantTier tier        = 3;
+  string     data_region = 4;
+}
+message CreateTenantResponse  { Tenant tenant = 1; }
+
+message GetTenantRequest      { string id = 1; }
+message GetTenantResponse     { Tenant tenant = 1; }
+
+message SuspendTenantRequest  { string id = 1; }
+message SuspendTenantResponse {}
+
+message ActivateTenantRequest { string id = 1; }
+message ActivateTenantResponse {}
+
+message CreateIdentityRequest {
+  string              tenant_id    = 1;
+  IdentityType        type         = 2;
+  string              display_name = 3;
+  string              handle       = 4;
+  string              created_by   = 5;
+  map<string, string> attributes   = 6;
+}
+message CreateIdentityResponse {
+  Identity    identity = 1;
+  IdentityKey key      = 2;
+}
+
+message GetIdentityRequest         { string tenant_id = 1; string id     = 2; }
+message GetIdentityByHandleRequest { string tenant_id = 1; string handle = 2; }
+message GetIdentityResponse        { Identity identity = 1; }
+
+message ListIdentitiesRequest {
+  string tenant_id = 1;
+  string type      = 2;
+  string status    = 3;
+  int32  limit     = 4;
+  int32  offset    = 5;
+}
+message ListIdentitiesResponse {
+  repeated Identity identities = 1;
+  int64             total      = 2;
+}
+
+message UpdateIdentityRequest {
+  string              tenant_id    = 1;
+  string              id           = 2;
+  string              display_name = 3;
+  map<string, string> attributes   = 4;
+  int64               version      = 5;
+  string              actor_id     = 6;
+}
+message UpdateIdentityResponse { Identity identity = 1; }
+
+message SuspendIdentityRequest    { string tenant_id = 1; string id = 2; string actor_id = 3; }
+message SuspendIdentityResponse   {}
+
+message ReactivateIdentityRequest { string tenant_id = 1; string id = 2; string actor_id = 3; }
+message ReactivateIdentityResponse {}
+
+message DeactivateIdentityRequest { string tenant_id = 1; string id = 2; string actor_id = 3; }
+message DeactivateIdentityResponse {}

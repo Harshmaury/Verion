@@ -1,0 +1,95 @@
+syntax = "proto3";
+package verion.v1;
+option go_package = "github.com/Harshmaury/verion/api/gen/go/verion/v1;verionv1";
+
+import "google/protobuf/timestamp.proto";
+
+enum IdentityType {
+  IDENTITY_TYPE_UNSPECIFIED = 0;
+  IDENTITY_TYPE_HUMAN       = 1;
+  IDENTITY_TYPE_ORG         = 2;
+  IDENTITY_TYPE_DEVICE      = 3;
+  IDENTITY_TYPE_SERVICE     = 4;
+  IDENTITY_TYPE_MACHINE     = 5;
+  IDENTITY_TYPE_AI_AGENT    = 6;
+}
+
+enum IdentityStatus {
+  IDENTITY_STATUS_UNSPECIFIED  = 0;
+  IDENTITY_STATUS_PENDING      = 1;
+  IDENTITY_STATUS_ACTIVE       = 2;
+  IDENTITY_STATUS_SUSPENDED    = 3;
+  IDENTITY_STATUS_DEACTIVATED  = 4;
+  IDENTITY_STATUS_ARCHIVED     = 5;
+}
+
+enum KeyType {
+  KEY_TYPE_UNSPECIFIED  = 0;
+  KEY_TYPE_ED25519      = 1;
+  KEY_TYPE_ECDSA_P256   = 2;
+  KEY_TYPE_ECDSA_P384   = 3;
+  KEY_TYPE_RSA_4096     = 4;
+}
+
+enum KeyPurpose {
+  KEY_PURPOSE_UNSPECIFIED    = 0;
+  KEY_PURPOSE_SIGNING        = 1;
+  KEY_PURPOSE_ENCRYPTION     = 2;
+  KEY_PURPOSE_AUTHENTICATION = 3;
+  KEY_PURPOSE_RECOVERY       = 4;
+}
+
+enum KeyStatus {
+  KEY_STATUS_UNSPECIFIED  = 0;
+  KEY_STATUS_ACTIVE       = 1;
+  KEY_STATUS_ROTATED      = 2;
+  KEY_STATUS_REVOKED      = 3;
+  KEY_STATUS_COMPROMISED  = 4;
+}
+
+enum TenantTier {
+  TENANT_TIER_UNSPECIFIED  = 0;
+  TENANT_TIER_STANDARD     = 1;
+  TENANT_TIER_PROFESSIONAL = 2;
+  TENANT_TIER_ENTERPRISE   = 3;
+}
+
+message Tenant {
+  string     id          = 1;
+  string     name        = 2;
+  string     slug        = 3;
+  TenantTier tier        = 4;
+  string     status      = 5;
+  string     data_region = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message Identity {
+  string         id             = 1;
+  string         tenant_id      = 2;
+  IdentityType   type           = 3;
+  string         display_name   = 4;
+  string         handle         = 5;
+  IdentityStatus status         = 6;
+  string         primary_key_id = 7;
+  map<string, string> attributes = 8;
+  int64          version        = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message IdentityKey {
+  string     id          = 1;
+  string     identity_id = 2;
+  string     tenant_id   = 3;
+  KeyType    key_type    = 4;
+  KeyPurpose purpose     = 5;
+  string     algorithm   = 6;
+  bytes      public_key  = 7;
+  string     fingerprint = 8;
+  KeyStatus  status      = 9;
+  google.protobuf.Timestamp created_at  = 10;
+  google.protobuf.Timestamp valid_from  = 11;
+  google.protobuf.Timestamp valid_until = 12;
+}
