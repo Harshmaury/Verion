@@ -5,123 +5,124 @@
 
 ---
 
-## Session Template (copy this for each new session)
+## Session 2026-07-07 — Phase 2 Begins
 
-```
----
-## Session YYYY-MM-DD — [Short title]
+**Phase:** Phase 2 — Authentication Engine
+**AI:** Claude Account A (Architect)
 
-**Duration:** ~X hours
-**Phase:** Phase X — Name
-**AI:** Claude / GPT-4 / etc.
-
-### What was accomplished
--
-
-### Decisions made
--
-
-### Files created / modified
--
-
-### Problems encountered & solutions
--
-
-### Current state (end of session)
--
+### Current state
+- Phase 1 complete and tagged `v0.1.0-phase1`
+- PROJECT.md and SESSION.md updated to reflect Phase 2 start
+- SPEC-009 issued (HTTP REST Gateway)
+- Context packed: `verion-context-20260707_061806.zip`
 
 ### Next session starts at
--
----
-```
+Phase 2 · Step 1 — Hand SPEC-009 to Implementer (Account B).
+Bring REPORT-009 back to Architect (Account A) for review.
 
 ---
 
-## Session 2026-06-27 — Project Foundation & Phase 1 Docker Infrastructure
+## Session 2026-07-04 — Phase 1 Complete
 
-**Duration:** ~2 hours
-**Phase:** Phase 0 → Phase 1
-**AI:** Claude (Anthropic)
+**Phase:** Phase 1 · Step 8
+**AI:** Claude Account A (Architect) + Account B (Implementer)
 
 ### What was accomplished
+- ✅ SPEC-008 issued: Wire Everything
+- ✅ REPORT-008 submitted by Implementer
+- ✅ REVIEW-008: CONDITIONAL PASS
+  - gRPC server wired and running on :50051
+  - HTTP gateway deferred to Phase 2 Step 1
+- ✅ `v0.1.0-phase1` tagged and pushed to GitHub
+- ✅ Graceful shutdown confirmed (SIGINT drain)
+- ✅ `grpc-gateway` and `protoc-gen-go-grpc` installed
 
-- ✅ Initialized complete project structure (`cmd/`, `internal/`, `api/`, `docs/`, `deployments/`, `scripts/`)
-- ✅ Go module initialized (`github.com/Harshmaury/verion`)
-- ✅ Makefile created with WSL PATH fix for Go binary
-- ✅ `.gitignore` created
-- ✅ `README.md` created with architecture overview
-- ✅ Git repository initialized and pushed to GitHub (`git@github.com:Harshmaury/Verion.git`)
-- ✅ ADR-000 template created
-- ✅ ADR-001 Technology Stack written and accepted
-- ✅ ADR-002 Identity Data Model written and accepted
-- ✅ `docs/DECISIONS.md` master decision register created (12 decisions tracked)
-- ✅ Docker Compose created (PostgreSQL 16 + Redis 7)
-- ✅ Both Docker services running and healthy
-- ✅ `PROJECT.md` created (master AI context file)
-- ✅ `SESSION.md` created (this file)
-- ✅ `scripts/context-pack.sh` created (AI context packaging tool)
-- ✅ Workflow document created (verion-workflow.docx)
+### Problems encountered
+- `buf` CLI failed to install (network timeouts on WSL)
+- Solution: kept hand-written pb.go stubs, upgraded with protoimpl
 
-### Decisions made
+### Current state
+- Phase 1: **COMPLETE** ✅
+- Server starts: `export VERION_MASTER_KEY=$(openssl rand -hex 32) && go run ./cmd/verion`
+- gRPC on :50051, HTTP gateway not yet built
 
-- **Language:** Go 1.24 (primary), Python (ML only), Rust (future)
-- **API:** gRPC + REST via grpc-gateway (proto-first)
-- **Database:** PostgreSQL 16 (ACID, RLS, multi-tenant)
-- **Cache:** Redis 7 (sessions, trust scores, pub/sub)
-- **Container:** Docker Compose (dev), Kubernetes (prod)
-- **Identity model:** Universal entity model supporting 6 identity types
-- **Crypto:** Ed25519 / ECDSA P-256, AES-256-GCM, Argon2id
-- **Private keys:** Never stored in DB — key_ref to external secure storage
-- **Soft delete only:** Identities never hard deleted
-- **Audit log:** Append-only, immutable
+---
 
-### Files created / modified
+## Session 2026-07-01 — SPEC-006, SPEC-007
 
-```
-cmd/verion/main.go
-go.mod
-Makefile                          (WSL PATH fix applied)
-.gitignore
-README.md
-docker-compose.yml
-deployments/docker/postgres/init.sql
-.env.example
-.env                              (git-ignored)
-docs/DECISIONS.md
-docs/adr/ADR-000-template.md
-docs/adr/ADR-001-technology-stack.md
-docs/adr/ADR-002-identity-data-model.md
-PROJECT.md
-SESSION.md
-scripts/context-pack.sh
-```
+**Phase:** Phase 1 · Steps 6 + 7
+**AI:** Claude Account A (Architect) + Account B (Implementer)
 
-### Problems encountered & solutions
+### What was accomplished
+- ✅ SPEC-006 issued + REPORT-006 reviewed: CONDITIONAL PASS
+  - Service layer: TenantService, IdentityService, KeyService
+  - Fixed duplicate audit event (one-line deletion)
+- ✅ SPEC-007 issued + REPORT-007 reviewed: PASS
+  - gRPC proto definitions (3 proto files)
+  - Hand-written pb.go stubs (5 files)
+  - gRPC handlers (3 files), error mapping, domain→proto mappers
+- ✅ Loose setup scripts moved to `scripts/setup/`
+- ✅ `go.mod`, `go.sum`, `docker-compose.yml` committed
 
-| Problem | Solution |
-|---------|----------|
-| `make build` → `go: Permission denied` | Added `PATH := /usr/local/go/bin:$(PATH)` to Makefile |
-| `docker compose up` → unknown flag `-d` | Docker Compose plugin not installed; use `docker-compose` (hyphen) |
-| `docker-compose up` → credential helper error | Set `"credsStore": ""` in `~/.docker/config.json` |
-| `git push origin main` → src refspec error | Branch was `master`; fixed with `git branch -M main` |
+### Problems encountered
+- REPORT-006: duplicate `AuditEventIdentityCreated` (repo + service both writing)
+- Fix: `sed -i '161d' internal/identity/identity_service.go`
 
-### Current state (end of session)
+---
 
-- Phase 0 — Foundation: **COMPLETE** ✅
-- Phase 1 — Identity Core: **IN PROGRESS** 🔄
-  - Step 1 Docker Compose: **COMPLETE** ✅
-  - Step 2 Database Migrations: **NEXT** ⏳
+## Session 2026-06-29 — SPEC-005
 
-### Next session starts at
+**Phase:** Phase 1 · Step 5
+**AI:** Claude Account A (Architect) + Account B (Implementer)
 
-**Phase 1 — Step 2: Database Migration Schema**
+### What was accomplished
+- ✅ AI Team Workflow system designed and installed
+  - SPEC/REPORT/REVIEW templates
+  - `docs/workflow/` directory
+  - Implementer Prompt defined
+- ✅ SPEC-005 issued + REPORT-005 reviewed: PASS
+  - Crypto service: Ed25519, ECDSA P-256, AES-256-GCM, Argon2id
+  - Local dev KeyStore (in-memory sync.Map)
+  - Sign interface mismatch resolved correctly
 
-Install `golang-migrate`, create migration files for:
-- `tenants` table
-- `identities` table
-- `identity_keys` table
-- `credentials` table
-- `recovery_methods` table
-- `audit_events` table
+---
 
-All based on ADR-002 identity data model.
+## Session 2026-06-28 — Steps 2, 3, 4
+
+**Phase:** Phase 1 · Steps 2–4
+**AI:** Claude Account A (Architect, direct coding)
+
+### What was accomplished
+- ✅ Database migrations (7 migrations, RLS on all tables)
+- ✅ Go domain model (enums, model, errors)
+- ✅ Repository layer (interfaces + PostgreSQL implementations)
+- ✅ `golang-migrate` v4.18.1 installed
+- ✅ `pgx/v5` installed
+
+### Problems encountered
+- `withTenantConn` callback type mismatch (anonymous interface vs `*pgxpool.Conn`)
+- Fix: rewrite all repo callbacks to use `*pgxpool.Conn` directly
+
+---
+
+## Session 2026-06-27 — Phase 0 + Phase 1 Step 1
+
+**Phase:** Phase 0 (Foundation) + Phase 1 Step 1
+**AI:** Claude Account A (Architect, direct coding)
+
+### What was accomplished
+- ✅ Project structure initialized
+- ✅ Go module (`github.com/Harshmaury/verion`)
+- ✅ Makefile with WSL PATH fix
+- ✅ Git initialized, pushed to GitHub
+- ✅ ADR-000, ADR-001, ADR-002 written
+- ✅ DECISIONS.md master register
+- ✅ Docker Compose (PostgreSQL 16 + Redis 7)
+- ✅ PROJECT.md + SESSION.md + context-pack.sh
+- ✅ Workflow document (verion-workflow.docx)
+
+### Problems encountered
+- `make build` → `go: Permission denied` → fixed Makefile PATH
+- `docker compose` → unknown flag → use `docker-compose` (hyphen)
+- Docker credential error → set `"credsStore": ""` in config.json
+- `git push origin main` → refspec error → `git branch -M main`

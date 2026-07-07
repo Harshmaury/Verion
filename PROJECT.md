@@ -24,9 +24,6 @@ into a unified platform.
 service identities, machine identities, and AI agent identities — all under
 one universal model.
 
-**Ambition:** Become foundational identity infrastructure the way TCP/IP
-standardized communication and TLS standardized transport security.
-
 ---
 
 ## Developer Profile
@@ -44,65 +41,78 @@ standardized communication and TLS standardized transport security.
 
 ---
 
-## Workflow Protocol (AI must follow this)
+## AI Team Workflow
 
-### File Delivery
-1. AI produces files with **unique timestamped names**: `verion-<component>-YYYYMMDD_HHMMSS.<ext>`
-2. Files are presented for download to `Verion-drop`
-3. AI provides exact `cp` command to copy from drop into project
-4. Developer runs the command, verifies, then confirms
+Three roles operate on this project:
 
-### Copy Command Pattern
+| Role | Who | Responsibility |
+|------|-----|----------------|
+| Engineering Lead | Harsh | Runs commands, moves files, final decisions |
+| Architect | Claude Account A | Designs, writes SPECs, reviews REPORTs |
+| Implementer | Claude Account B | Reads SPECs, writes code, submits REPORTs |
+
+### Implementer Prompt (paste this every time)
+```
+You are an Implementer engineer. Your only job is to write code.
+
+Read PROJECT.md from the context zip first.
+Then read the SPEC file carefully.
+
+DO NOT review. DO NOT discuss. BUILD the code. Every file in the SPEC.
+Use timestamped filenames. Submit a REPORT when done.
+Produce an install script.
+
+Drop: C:\Users\harsh\Downloads\Verion-drop
+Project root (WSL): /home/harsh/workspace/projects/Verion
+```
+
+### File naming
+All deliverables: `verion-<component>-YYYYMMDD_HHMMSS.<ext>`
+
+### Copy command pattern
 ```bash
 cd /home/harsh/workspace/projects/Verion
 cp /mnt/c/Users/harsh/Downloads/Verion-drop/<filename> <target-path>
 ```
 
-### Git Convention
+---
+
+## Workflow Documents
 ```
-<type>(<scope>): <description>
-
-Types: feat | fix | docs | chore | refactor | test | arch
-```
-
-### Branch Strategy
-- `main` — stable only
-- `dev` — active development
-- `feat/<name>` — feature branches
-
-### Makefile PATH fix (WSL)
-The Makefile has this at the top to fix Go PATH in WSL:
-```makefile
-SHELL := /bin/bash
-PATH := /usr/local/go/bin:$(PATH)
+docs/workflow/
+  WORKFLOW.md          ← complete system guide
+  SPEC-template.md
+  REPORT-template.md
+  REVIEW-template.md
+  specs/               ← all issued SPECs
 ```
 
 ---
 
-## Technology Stack (LOCKED — see ADR-001)
+## Known WSL Issues (already fixed)
+
+| Issue | Fix Applied |
+|-------|-------------|
+| `make build` → `go: Permission denied` | `PATH := /usr/local/go/bin:$(PATH)` in Makefile |
+| `docker compose` → unknown flag | Use `docker-compose` (hyphen) not `docker compose` |
+| Docker credential error | Set `"credsStore": ""` in `~/.docker/config.json` |
+| `git push origin main` → refspec error | `git branch -M main` |
+
+---
+
+## Technology Stack (LOCKED — ADR-001)
 
 | Layer | Technology | Version |
 |-------|-----------|---------|
-| Language | Go | 1.24 |
+| Language | Go | 1.25 |
 | Internal API | gRPC + Protobuf | proto3 |
-| External API | REST via grpc-gateway | v2 |
-| API Spec | OpenAPI | 3.0 |
+| External API | REST (net/http) | stdlib |
 | Primary Database | PostgreSQL | 16 |
 | Cache / Session | Redis | 7 |
-| Container (dev) | Docker Compose | v1 (standalone) |
-| Container (prod) | Kubernetes | 1.29+ |
-| Migrations | golang-migrate | latest |
-| Config | Viper | latest |
-| Logging | Zap (uber-go) | latest |
-| Metrics | Prometheus | latest |
-| Tracing | OpenTelemetry | latest |
-| Testing | Go stdlib + testify | latest |
+| Container (dev) | Docker Compose | v1 standalone |
+| Crypto | Ed25519, ECDSA P-256, AES-256-GCM, Argon2id | — |
 
-**Important WSL note:** Use `docker-compose` (hyphen), NOT `docker compose` (space).
-The Docker Compose plugin is not installed — only standalone docker-compose works.
-
-**Important Docker note:** `~/.docker/config.json` must have `"credsStore": ""`
-to prevent credential helper errors in WSL.
+**Important:** Use `docker-compose` (hyphen) in WSL — plugin not installed.
 
 ---
 
@@ -110,52 +120,65 @@ to prevent credential helper errors in WSL.
 
 ```
 module github.com/Harshmaury/verion
-go 1.24
+go 1.25
 ```
 
 ---
 
-## Project Structure
+## Project Structure (current state)
 
 ```
 /home/harsh/workspace/projects/Verion/
-├── cmd/
-│   └── verion/main.go           ✓ EXISTS — entry point
+├── cmd/verion/main.go               ✓ Full server wiring
 ├── internal/
-│   ├── identity/                ⏳ Phase 1
-│   ├── auth/                    ⏳ Phase 2
-│   ├── trust/                   ⏳ Phase 3
-│   ├── authz/                   ⏳ Phase 4
-│   ├── session/                 ⏳ Phase 2
-│   ├── crypto/                  ⏳ Phase 1
-│   ├── device/                  ⏳ Phase 5
-│   ├── recovery/                ⏳ Phase 1
-│   └── audit/                   ⏳ Phase 1
-├── pkg/                         ⏳ Phase 3+
+│   ├── identity/                    ✓ Domain model + service layer
+│   │   ├── model.go                 ✓ All domain structs
+│   │   ├── enums.go                 ✓ All typed enums
+│   │   ├── errors.go                ✓ Typed sentinel errors
+│   │   ├── repository.go            ✓ Repository interfaces
+│   │   ├── tenant_service.go        ✓ TenantService
+│   │   ├── identity_service.go      ✓ IdentityService
+│   │   ├── key_service.go           ✓ KeyService
+│   │   ├── svc_helpers.go           ✓ wrapRepoError
+│   │   └── postgres/                ✓ PostgreSQL implementations
+│   │       ├── db.go                ✓ pgxpool + RLS helpers
+│   │       ├── tenant_repo.go       ✓
+│   │       ├── identity_repo.go     ✓
+│   │       └── audit_key_repo.go    ✓
+│   ├── crypto/                      ✓ Crypto service
+│   │   ├── service.go               ✓ CryptoService interface + Service
+│   │   ├── keys.go                  ✓ Ed25519 + ECDSA key generation
+│   │   ├── aes.go                   ✓ AES-256-GCM encrypt/decrypt
+│   │   ├── hash.go                  ✓ Argon2id hashing
+│   │   └── local/keystore.go        ✓ Dev-only in-memory KeyStore
+│   ├── config/                      ✓ Config loader (env vars)
+│   ├── transport/
+│   │   └── grpc/                    ✓ gRPC handlers
+│   │       ├── server.go            ✓
+│   │       ├── identity_server.go   ✓
+│   │       └── keys_server.go       ✓
+│   ├── auth/                        ⏳ Phase 2
+│   ├── session/                     ⏳ Phase 2
+│   └── trust/                       ⏳ Phase 3
 ├── api/
-│   ├── proto/                   ⏳ Phase 1 Step 7
-│   └── rest/                    ⏳ Phase 1 Step 7
+│   ├── proto/verion/v1/             ✓ Proto definitions
+│   └── gen/go/verion/v1/            ✓ Hand-written pb.go stubs
+├── internal/db/migrations/          ✓ 7 migrations (001–007)
 ├── docs/
-│   ├── DECISIONS.md             ✓ EXISTS — master decision register
-│   └── adr/
-│       ├── ADR-000-template.md  ✓ EXISTS
-│       ├── ADR-001-technology-stack.md     ✓ EXISTS
-│       └── ADR-002-identity-data-model.md  ✓ EXISTS
-├── deployments/
-│   ├── docker/
-│   │   └── postgres/init.sql   ✓ EXISTS
-│   └── k8s/                    ⏳ Phase 6
+│   ├── DECISIONS.md                 ✓ Master decision register
+│   ├── adr/                         ✓ ADR-000 through ADR-002
+│   └── workflow/                    ✓ SPEC/REPORT/REVIEW system
+├── deployments/docker/postgres/     ✓
 ├── scripts/
-│   └── context-pack.sh         ✓ EXISTS — context packaging tool
-├── docker-compose.yml           ✓ EXISTS
-├── .env.example                 ✓ EXISTS
-├── .env                         ✓ EXISTS (git-ignored)
-├── go.mod                       ✓ EXISTS
-├── Makefile                     ✓ EXISTS (WSL PATH fixed)
-├── README.md                    ✓ EXISTS
-├── .gitignore                   ✓ EXISTS
-├── PROJECT.md                   ✓ THIS FILE
-└── SESSION.md                   ✓ EXISTS — session log
+│   ├── context-pack.sh              ✓ AI context packaging tool
+│   └── setup/                       ✓ Historical setup scripts
+├── docker-compose.yml               ✓
+├── .env.example                     ✓ (gitignored)
+├── go.mod / go.sum                  ✓
+├── Makefile                         ✓ WSL PATH fixed
+├── README.md                        ✓
+├── PROJECT.md                       ✓ THIS FILE
+└── SESSION.md                       ✓ Session log
 ```
 
 ---
@@ -170,35 +193,26 @@ go 1.24
 | ADR-003 | Cryptographic Primitives | 🟡 Proposed |
 | ADR-004 | API Protocol Design | 🟡 Proposed |
 | ADR-005 | Database Migration Strategy | 🟡 Proposed |
-| ADR-006 | Session & Token Design | 🟡 Proposed |
-| ADR-007 | WebAuthn / FIDO2 Strategy | 🟡 Proposed |
-| ADR-008 | Trust Score Model | 🟡 Proposed |
-| ADR-009 | Policy Engine Design | 🟡 Proposed |
-| ADR-010 | Federation Protocol Support | 🟡 Proposed |
-| ADR-011 | Observability Stack | 🟡 Proposed |
-| ADR-012 | Post-Quantum Crypto Path | 🟡 Proposed |
-
-Full details in `docs/DECISIONS.md` and `docs/adr/`.
+| ADR-006 | Session & Token Design | 🟡 Proposed — Phase 2 |
+| ADR-007 | WebAuthn / FIDO2 Strategy | 🟡 Proposed — Phase 2 |
 
 ---
 
-## Identity Data Model Summary (ADR-002)
+## Identity Data Model (ADR-002)
 
-Core entities:
+Core entities in PostgreSQL:
+- **tenants** — top-level isolation boundary
+- **identities** — universal entity (6 types)
+- **identity_keys** — cryptographic key pairs (public only in DB)
+- **credentials** — auth mechanisms (passkey, TOTP, API key, mTLS)
+- **recovery_methods** — recovery codes, backup keys
+- **audit_events** — append-only immutable log
 
-- **Identity** — Universal entity (human | org | device | service | machine | ai_agent)
-- **IdentityKey** — Cryptographic key pairs (Ed25519, ECDSA P-256/P-384)
-- **Credential** — Auth mechanisms (passkey, TOTP, hardware token, API key, mTLS)
-- **Tenant** — Multi-tenant isolation (every identity belongs to one tenant)
-- **AuditEvent** — Append-only immutable audit log
-- **RecoveryMethod** — Recovery codes, backup keys, trusted contacts
-
-Key rules:
-- Every identity owns ≥1 cryptographic key pair
-- Private keys are NEVER stored in the database
-- Identities are NEVER hard deleted (soft delete only)
-- Audit log is NEVER updated or deleted (append-only)
-- Every table has `tenant_id` (enforced at DB level via RLS)
+Key rules enforced:
+- Private keys NEVER in database — `key_ref` points to KeyStore
+- Identities NEVER hard deleted — soft delete only
+- Audit log NEVER updated or deleted — append only
+- Every table has `tenant_id` — RLS enforced at DB level
 
 ---
 
@@ -207,8 +221,8 @@ Key rules:
 | Phase | Name | Status |
 |-------|------|--------|
 | Phase 0 | Foundation | ✅ COMPLETE |
-| Phase 1 | Identity Core | 🔄 IN PROGRESS |
-| Phase 2 | Authentication Engine | ⏳ Planned |
+| Phase 1 | Identity Core | ✅ COMPLETE — tagged `v0.1.0-phase1` |
+| Phase 2 | Authentication Engine | 🔄 IN PROGRESS |
 | Phase 3 | Trust Evaluation Engine | ⏳ Planned |
 | Phase 4 | Authorization & Policy | ⏳ Planned |
 | Phase 5 | Federation | ⏳ Planned |
@@ -216,55 +230,91 @@ Key rules:
 
 ---
 
-## Phase 1 — Identity Core Build Order
+## Phase 1 — COMPLETE ✅
 
-| Step | Task | Status |
-|------|------|--------|
-| Step 1 | Docker Compose (PostgreSQL + Redis) | ✅ COMPLETE |
-| Step 2 | Database Migration Schema | ⏳ NEXT |
-| Step 3 | Go Domain Model (Identity structs) | ⏳ |
-| Step 4 | Repository Layer (DB operations) | ⏳ |
-| Step 5 | Crypto Service (key generation) | ⏳ |
-| Step 6 | Service Layer (business logic) | ⏳ |
-| Step 7 | gRPC Proto definition | ⏳ |
-| Step 8 | Wire everything together | ⏳ |
+All 8 steps done. Tagged `v0.1.0-phase1`.
+
+Server starts with:
+```bash
+export VERION_MASTER_KEY=$(openssl rand -hex 32)
+docker-compose up -d postgres
+go run ./cmd/verion
+# → gRPC server on :50051
+```
 
 ---
 
-## Local Services (when Docker is running)
+## Phase 2 — Authentication Engine
+
+| Step | Task | Status |
+|------|------|--------|
+| Step 1 (SPEC-009) | HTTP REST Gateway + middleware | ⏳ NEXT |
+| Step 2 (SPEC-010) | WebAuthn passkey registration | ⏳ |
+| Step 3 (SPEC-011) | WebAuthn assertion (login) | ⏳ |
+| Step 4 (SPEC-012) | JWT token issuance + verification | ⏳ |
+| Step 5 (SPEC-013) | Session management (Redis) | ⏳ |
+| Step 6 (SPEC-014) | TOTP support | ⏳ |
+
+---
+
+## Local Services
 
 | Service | Address | Credentials |
 |---------|---------|-------------|
 | PostgreSQL | localhost:5432 | user: verion / pass: verion_dev_secret / db: verion |
 | Redis | localhost:6379 | password: verion_redis_secret |
+| gRPC server | localhost:50051 | no auth (Phase 2) |
+| REST gateway | localhost:8080 | not built yet (SPEC-009) |
 
-Start services: `docker-compose up -d`
-Stop services: `docker-compose down`
-View logs: `docker-compose logs -f`
+Start: `docker-compose up -d`
+Stop: `docker-compose down`
 
 ---
 
-## How to Start a New AI Session
+## Environment Variables
 
-1. Run `./scripts/context-pack.sh` — produces `verion-context-TIMESTAMP.zip`
-2. The zip lands in `C:\Users\harsh\Downloads\Verion-drop` automatically
-3. Upload the zip to the new AI conversation
-4. Say: *"Unzip and read all files. This is the Verion project. Read PROJECT.md
-   first, then SESSION.md. Continue from where we left off."*
+| Variable | Required | Default | Purpose |
+|----------|----------|---------|---------|
+| `VERION_MASTER_KEY` | ✓ | — | 64-char hex AES-256 key |
+| `VERION_GRPC_ADDR` | No | `:50051` | gRPC listen address |
+| `VERION_DB_HOST` | No | `localhost` | Postgres host |
+| `VERION_DB_PORT` | No | `5432` | Postgres port |
+| `VERION_DB_NAME` | No | `verion` | Postgres database |
+| `VERION_DB_USER` | No | `verion` | Postgres user |
+| `VERION_DB_PASSWORD` | No | `verion_dev_secret` | Postgres password |
 
-The AI will have full context within seconds.
+Generate master key: `openssl rand -hex 32`
+
+---
+
+## Git History
+
+```
+a48ca59 feat(wire): wire full stack — Phase 1 complete (SPEC-008)  ← v0.1.0-phase1
+366652f feat(grpc): add gRPC transport layer (SPEC-007)
+722d48f fix(identity): remove duplicate audit event in CreateIdentity
+3203a4b feat(identity): add service layer (SPEC-006)
+fe02d31 feat(crypto): add crypto service (SPEC-005)
+88e0316 fix(identity): resolve withTenantConn callback type mismatch
+c85df50 feat(identity): add Go domain model
+9f6129a feat(db): add identity core database migrations
+b9b9ee8 chore(meta): add project intelligence system
+27695ce docs(adr): add ADR-000, ADR-001, ADR-002
+```
 
 ---
 
 ## Rules for AI Working on This Project
 
-1. **Never skip ADRs** — every major decision needs a decision record
-2. **Never hardcode secrets** — always use `.env` and Viper config
-3. **Never store private keys in the database** — use `key_ref` to external storage
-4. **Never hard delete identities** — set `status = deactivated`
-5. **Never write to audit log except appending** — no UPDATE/DELETE on AuditEvent
-6. **Always include `tenant_id`** in every query
-7. **Always use timestamped filenames** for deliverables
-8. **Always provide the `cp` command** with every file
-9. **Use `docker-compose`** (hyphen) not `docker compose` (space) in WSL
-10. **Update SESSION.md** at the end of every session
+1. Never skip ADRs for major decisions
+2. Never hardcode secrets — use env vars
+3. Never store private keys in the database — use `key_ref`
+4. Never hard delete identities — `status = deactivated`
+5. Never write to audit log except appending
+6. Always include `tenant_id` in every query
+7. Always use timestamped filenames for deliverables
+8. Always provide the `cp` command with every file
+9. Use `docker-compose` (hyphen) not `docker compose` in WSL
+10. Transport layer must never import repository layer directly
+11. Service layer is the only entry point from transport to data
+12. `ProtoReflect()` returning nil is acceptable until Phase 2 auth work requires JSON transcoding
