@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -16,6 +18,7 @@ import (
 	"github.com/Harshmaury/verion/internal/identity"
 	"github.com/Harshmaury/verion/internal/identity/postgres"
 	grpctransport "github.com/Harshmaury/verion/internal/transport/grpc"
+	transporthttp "github.com/Harshmaury/verion/internal/transport/http"
 )
 
 func main() {
@@ -23,6 +26,7 @@ func main() {
 
 	// ── 1. Config from environment ────────────────────────────────────────────
 	grpcAddr     := envOrDefault("VERION_GRPC_ADDR", ":50051")
+	httpAddr     := envOrDefault("VERION_HTTP_ADDR", ":8080")
 	masterKeyHex := mustEnv("VERION_MASTER_KEY")
 
 	masterKey, err := decodeHexKey(masterKeyHex)
@@ -44,7 +48,7 @@ func main() {
 		log.Fatalf("connect postgres: %v", err)
 	}
 	defer db.Close()
-	log.Println("✓ postgres connected")
+	slog.Info("✓ postgres connected")
 
 	// ── 3. Repositories ───────────────────────────────────────────────────────
 	auditRepo    := postgres.NewAuditRepo(db)
@@ -63,7 +67,7 @@ func main() {
 	keyStore  := local.New()
 	cryptoCfg := crypto.DefaultConfig(masterKey)
 	cryptoSvc := crypto.New(cryptoCfg, keyStore)
-	log.Println("✓ crypto service ready (local keystore — dev only)")
+	slog.Info("✓ crypto service ready (local keystore — dev only)")
 
 	// ── 5. Service layer ──────────────────────────────────────────────────────
 	tenantSvc   := identity.NewTenantService(repos)
@@ -71,40 +75,46 @@ func main() {
 	keySvc      := identity.NewKeyService(repos, cryptoSvc)
 
 	// ── 6. gRPC server ────────────────────────────────────────────────────────
-	grpcServer := grpctransport.New(identitySvc, tenantSvc, keySvc)
+	grpcSrv := grpctransport.New(identitySvc, tenantSvc, keySvc)
 
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		log.Fatalf("listen %s: %v", grpcAddr, err)
 	}
 
-	// ── 7. Serve with graceful shutdown ───────────────────────────────────────
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		fmt.Printf("Verion gRPC server listening on %s\n", grpcAddr)
-		if err := grpcServer.GRPCServer().Serve(lis); err != nil {
-			log.Printf("grpc serve: %v", err)
+		slog.Info("gRPC server listening", "addr", grpcAddr)
+		if err := grpcSrv.GRPCServer().Serve(lis); err != nil {
+			slog.Error("gRPC server error", "err", err)
 		}
 	}()
 
-	<-quit
-	log.Println("shutdown signal received — draining...")
+	// ── 7. HTTP gateway ───────────────────────────────────────────────────────
+	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc)
 
-	stopped := make(chan struct{})
 	go func() {
-		grpcServer.GRPCServer().GracefulStop()
-		close(stopped)
+		slog.Info("HTTP gateway listening", "addr", httpAddr)
+		if err := gw.Start(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP gateway error", "err", err)
+		}
 	}()
 
-	select {
-	case <-stopped:
-		log.Println("✓ graceful shutdown complete")
-	case <-time.After(30 * time.Second):
-		log.Println("shutdown timeout — forcing stop")
-		grpcServer.GRPCServer().Stop()
+	// ── 8. Graceful shutdown ──────────────────────────────────────────────────
+	<-quit
+	slog.Info("shutdown signal received — draining...")
+
+	shutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := gw.Shutdown(shutCtx); err != nil {
+		slog.Error("HTTP gateway shutdown error", "err", err)
 	}
+	grpcSrv.GRPCServer().GracefulStop()
+	db.Close()
+	slog.Info("✓ graceful shutdown complete")
 }
 
 func mustEnv(key string) string {
