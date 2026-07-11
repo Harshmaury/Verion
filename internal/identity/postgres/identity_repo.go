@@ -43,8 +43,8 @@ const (
 
 	sqlIdentityUpdateStatus = `
 		UPDATE identities
-		SET status=$3,
-		    deactivated_at=CASE WHEN $3 IN ('deactivated','archived') THEN now() ELSE deactivated_at END,
+		SET status=$3::identity_status,
+		    deactivated_at=CASE WHEN $3::identity_status::text IN ('deactivated','archived') THEN now() ELSE deactivated_at END,
 		    updated_at=now()
 		WHERE tenant_id=$1 AND id=$2`
 
