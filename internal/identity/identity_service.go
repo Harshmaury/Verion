@@ -251,13 +251,16 @@ func (s *identityService) DeactivateIdentity(ctx context.Context, tenantID, id s
 		return wrapRepoError(err, "deactivate identity")
 	}
 
-	actor := actorID
+	var actorPtr *string
+	if actorID != "" {
+		actorPtr = &actorID
+	}
 	if err := s.repos.Audit.Insert(ctx, &AuditEvent{
 		TenantID:   tenantID,
 		EventType:  AuditEventIdentityDeactivated,
 		EntityType: "identity",
 		EntityID:   id,
-		ActorID:    &actor,
+		ActorID:    actorPtr,
 		Success:    true,
 	}); err != nil {
 		return fmt.Errorf("write audit event: %w", err)
@@ -278,13 +281,16 @@ func (s *identityService) SuspendIdentity(ctx context.Context, tenantID, id stri
 		return wrapRepoError(err, "suspend identity")
 	}
 
-	actor := actorID
+	var actorPtr *string
+	if actorID != "" {
+		actorPtr = &actorID
+	}
 	if err := s.repos.Audit.Insert(ctx, &AuditEvent{
 		TenantID:   tenantID,
 		EventType:  AuditEventIdentitySuspended,
 		EntityType: "identity",
 		EntityID:   id,
-		ActorID:    &actor,
+		ActorID:    actorPtr,
 		Success:    true,
 	}); err != nil {
 		return fmt.Errorf("write audit event: %w", err)
@@ -305,13 +311,16 @@ func (s *identityService) ReactivateIdentity(ctx context.Context, tenantID, id s
 		return wrapRepoError(err, "reactivate identity")
 	}
 
-	actor := actorID
+	var actorPtr *string
+	if actorID != "" {
+		actorPtr = &actorID
+	}
 	if err := s.repos.Audit.Insert(ctx, &AuditEvent{
 		TenantID:   tenantID,
 		EventType:  AuditEventIdentityActivated,
 		EntityType: "identity",
 		EntityID:   id,
-		ActorID:    &actor,
+		ActorID:    actorPtr,
 		Success:    true,
 	}); err != nil {
 		return fmt.Errorf("write audit event: %w", err)
