@@ -13,10 +13,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Harshmaury/verion/internal/auth"
 	"github.com/Harshmaury/verion/internal/crypto"
 	"github.com/Harshmaury/verion/internal/crypto/local"
 	"github.com/Harshmaury/verion/internal/identity"
 	"github.com/Harshmaury/verion/internal/identity/postgres"
+	"github.com/Harshmaury/verion/internal/store"
 	grpctransport "github.com/Harshmaury/verion/internal/transport/grpc"
 	transporthttp "github.com/Harshmaury/verion/internal/transport/http"
 )
@@ -24,7 +26,7 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// ── 1. Config from environment ────────────────────────────────────────────
+	// ── 1. Config ─────────────────────────────────────────────────────────────
 	grpcAddr     := envOrDefault("VERION_GRPC_ADDR", ":50051")
 	httpAddr     := envOrDefault("VERION_HTTP_ADDR", ":8080")
 	masterKeyHex := mustEnv("VERION_MASTER_KEY")
@@ -51,16 +53,18 @@ func main() {
 	slog.Info("✓ postgres connected")
 
 	// ── 3. Repositories ───────────────────────────────────────────────────────
-	auditRepo    := postgres.NewAuditRepo(db)
-	keyRepo      := postgres.NewKeyRepo(db)
-	tenantRepo   := postgres.NewTenantRepo(db)
-	identityRepo := postgres.NewIdentityRepo(db, auditRepo)
+	auditRepo      := postgres.NewAuditRepo(db)
+	keyRepo        := postgres.NewKeyRepo(db)
+	tenantRepo     := postgres.NewTenantRepo(db)
+	identityRepo   := postgres.NewIdentityRepo(db, auditRepo)
+	credentialRepo := postgres.NewCredentialRepo(db)
 
-	repos := &identity.Repositories{
-		Tenants:    tenantRepo,
-		Identities: identityRepo,
-		Keys:       keyRepo,
-		Audit:      auditRepo,
+	repos := identity.Repositories{
+		Tenants:     tenantRepo,
+		Identities:  identityRepo,
+		Keys:        keyRepo,
+		Credentials: credentialRepo,
+		Audit:       auditRepo,
 	}
 
 	// ── 4. Crypto service ─────────────────────────────────────────────────────
@@ -70,13 +74,35 @@ func main() {
 	slog.Info("✓ crypto service ready (local keystore — dev only)")
 
 	// ── 5. Service layer ──────────────────────────────────────────────────────
-	tenantSvc   := identity.NewTenantService(repos)
-	identitySvc := identity.NewIdentityService(repos, cryptoSvc)
-	keySvc      := identity.NewKeyService(repos, cryptoSvc)
+	tenantSvc   := identity.NewTenantService(&repos)
+	identitySvc := identity.NewIdentityService(&repos, cryptoSvc)
+	keySvc      := identity.NewKeyService(&repos, cryptoSvc)
 
-	// ── 6. gRPC server ────────────────────────────────────────────────────────
+	// ── 6. Redis ──────────────────────────────────────────────────────────────
+	redisStore, err := store.New(ctx, envOrDefault("VERION_REDIS_URL", "redis://:verion_redis_secret@localhost:6379/0"))
+	if err != nil {
+		slog.Error("redis connection failed", "err", err)
+		os.Exit(1)
+	}
+	defer redisStore.Close()
+	slog.Info("✓ redis connected")
+
+	// ── 7. WebAuthn ───────────────────────────────────────────────────────────
+	wauthnCfg := auth.WebAuthnConfig{
+		RPID:          envOrDefault("VERION_WEBAUTHN_RPID", "localhost"),
+		RPDisplayName: envOrDefault("VERION_WEBAUTHN_DISPLAY_NAME", "Verion"),
+		RPOrigins:     []string{envOrDefault("VERION_WEBAUTHN_ORIGIN", "http://localhost:8080")},
+	}
+	wauthnSvc, err := auth.New(wauthnCfg, redisStore, identitySvc, keySvc, &repos)
+	if err != nil {
+		slog.Error("webauthn init failed", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("✓ webauthn service ready")
+	wauthnHandler := transporthttp.NewWebAuthnHandler(wauthnSvc)
+
+	// ── 8. gRPC server ────────────────────────────────────────────────────────
 	grpcSrv := grpctransport.New(identitySvc, tenantSvc, keySvc)
-
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
 		log.Fatalf("listen %s: %v", grpcAddr, err)
@@ -92,8 +118,8 @@ func main() {
 		}
 	}()
 
-	// ── 7. HTTP gateway ───────────────────────────────────────────────────────
-	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc)
+	// ── 9. HTTP gateway ───────────────────────────────────────────────────────
+	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc, wauthnHandler)
 
 	go func() {
 		slog.Info("HTTP gateway listening", "addr", httpAddr)
@@ -102,7 +128,7 @@ func main() {
 		}
 	}()
 
-	// ── 8. Graceful shutdown ──────────────────────────────────────────────────
+	// ── 10. Graceful shutdown ─────────────────────────────────────────────────
 	<-quit
 	slog.Info("shutdown signal received — draining...")
 

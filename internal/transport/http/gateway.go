@@ -16,6 +16,7 @@ type Gateway struct {
 	identitySvc identity.IdentityService
 	tenantSvc   identity.TenantService
 	keySvc      identity.KeyService
+	wauthn      *WebAuthnHandler
 }
 
 // New creates a Gateway, registers all routes, applies middleware stack.
@@ -24,11 +25,13 @@ func New(
 	identitySvc identity.IdentityService,
 	tenantSvc identity.TenantService,
 	keySvc identity.KeyService,
+	wauthn *WebAuthnHandler,
 ) *Gateway {
 	g := &Gateway{
 		identitySvc: identitySvc,
 		tenantSvc:   tenantSvc,
 		keySvc:      keySvc,
+		wauthn:      wauthn,
 	}
 
 	mux := http.NewServeMux()
@@ -60,7 +63,6 @@ func (g *Gateway) Shutdown(ctx context.Context) error {
 
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
-// writeJSON encodes v as JSON and writes with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -69,12 +71,10 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-// writeError writes a JSON error response: {"error": "message"}
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// writeServiceError maps domain errors to HTTP status codes.
 func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, identity.ErrNotFound),

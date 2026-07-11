@@ -12,6 +12,10 @@ func (g *Gateway) registerRoutes(mux *http.ServeMux) {
 	// Health
 	mux.HandleFunc("GET /healthz", g.handleHealthz)
 
+	// WebAuthn registration
+	mux.HandleFunc("POST /v1/auth/register", g.wauthn.RegisterBegin)
+	mux.HandleFunc("POST /v1/auth/register/complete", g.wauthn.RegisterComplete)
+
 	// Tenant routes
 	mux.HandleFunc("POST /v1/tenants", g.handleCreateTenant)
 	mux.HandleFunc("GET /v1/tenants/{id}", g.handleGetTenant)
@@ -57,7 +61,6 @@ func (g *Gateway) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	result, err := g.tenantSvc.CreateTenant(r.Context(), identity.CreateTenantInput{
 		Name:       req.Name,
 		Slug:       req.Slug,
@@ -72,8 +75,7 @@ func (g *Gateway) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleGetTenant(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	result, err := g.tenantSvc.GetTenant(r.Context(), id)
+	result, err := g.tenantSvc.GetTenant(r.Context(), r.PathValue("id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -82,8 +84,7 @@ func (g *Gateway) handleGetTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleSuspendTenant(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := g.tenantSvc.SuspendTenant(r.Context(), id); err != nil {
+	if err := g.tenantSvc.SuspendTenant(r.Context(), r.PathValue("id")); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -91,8 +92,7 @@ func (g *Gateway) handleSuspendTenant(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleActivateTenant(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := g.tenantSvc.ActivateTenant(r.Context(), id); err != nil {
+	if err := g.tenantSvc.ActivateTenant(r.Context(), r.PathValue("id")); err != nil {
 		writeServiceError(w, err)
 		return
 	}
@@ -103,18 +103,17 @@ func (g *Gateway) handleActivateTenant(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) handleCreateIdentity(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TenantID    string            `json:"tenant_id"`
-		Type        string            `json:"type"`
-		DisplayName string            `json:"display_name"`
-		Handle      string            `json:"handle"`
-		CreatedBy   string            `json:"created_by"`
-		Attributes  map[string]any    `json:"attributes"`
+		TenantID    string         `json:"tenant_id"`
+		Type        string         `json:"type"`
+		DisplayName string         `json:"display_name"`
+		Handle      string         `json:"handle"`
+		CreatedBy   string         `json:"created_by"`
+		Attributes  map[string]any `json:"attributes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	input := identity.CreateIdentityInput{
 		TenantID:    req.TenantID,
 		Type:        identity.IdentityType(req.Type),
@@ -125,7 +124,6 @@ func (g *Gateway) handleCreateIdentity(w http.ResponseWriter, r *http.Request) {
 	if req.CreatedBy != "" {
 		input.CreatedBy = &req.CreatedBy
 	}
-
 	result, err := g.identitySvc.CreateIdentity(r.Context(), input)
 	if err != nil {
 		writeServiceError(w, err)
@@ -135,13 +133,12 @@ func (g *Gateway) handleCreateIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleGetIdentity(w http.ResponseWriter, r *http.Request) {
-	id       := r.PathValue("id")
 	tenantID := r.URL.Query().Get("tenant_id")
 	if tenantID == "" {
 		writeError(w, http.StatusBadRequest, "tenant_id query parameter required")
 		return
 	}
-	result, err := g.identitySvc.GetIdentity(r.Context(), tenantID, id)
+	result, err := g.identitySvc.GetIdentity(r.Context(), tenantID, r.PathValue("id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -150,13 +147,12 @@ func (g *Gateway) handleGetIdentity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleGetByHandle(w http.ResponseWriter, r *http.Request) {
-	handle   := r.PathValue("handle")
 	tenantID := r.URL.Query().Get("tenant_id")
 	if tenantID == "" {
 		writeError(w, http.StatusBadRequest, "tenant_id query parameter required")
 		return
 	}
-	result, err := g.identitySvc.GetIdentityByHandle(r.Context(), tenantID, handle)
+	result, err := g.identitySvc.GetIdentityByHandle(r.Context(), tenantID, r.PathValue("handle"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -170,9 +166,7 @@ func (g *Gateway) handleListIdentities(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tenant_id query parameter required")
 		return
 	}
-	results, err := g.identitySvc.ListIdentities(r.Context(), tenantID, identity.IdentityFilter{
-		Limit: 50,
-	})
+	results, err := g.identitySvc.ListIdentities(r.Context(), tenantID, identity.IdentityFilter{Limit: 50})
 	if err != nil {
 		writeServiceError(w, err)
 		return
@@ -193,7 +187,6 @@ func (g *Gateway) handleUpdateIdentity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	input := identity.UpdateIdentityInput{
 		TenantID:    req.TenantID,
 		ID:          id,
@@ -204,7 +197,6 @@ func (g *Gateway) handleUpdateIdentity(w http.ResponseWriter, r *http.Request) {
 	if req.ActorID != "" {
 		input.ActorID = &req.ActorID
 	}
-
 	result, err := g.identitySvc.UpdateIdentity(r.Context(), input)
 	if err != nil {
 		writeServiceError(w, err)
@@ -278,7 +270,6 @@ func (g *Gateway) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	input := identity.GenerateKeyInput{
 		TenantID:   req.TenantID,
 		IdentityID: req.IdentityID,
@@ -288,7 +279,6 @@ func (g *Gateway) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 	if req.ActorID != "" {
 		input.ActorID = &req.ActorID
 	}
-
 	result, err := g.keySvc.GenerateKey(r.Context(), input)
 	if err != nil {
 		writeServiceError(w, err)
@@ -298,13 +288,12 @@ func (g *Gateway) handleGenerateKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) handleGetKey(w http.ResponseWriter, r *http.Request) {
-	keyID    := r.PathValue("key_id")
 	tenantID := r.URL.Query().Get("tenant_id")
 	if tenantID == "" {
 		writeError(w, http.StatusBadRequest, "tenant_id query parameter required")
 		return
 	}
-	result, err := g.keySvc.GetKey(r.Context(), tenantID, keyID)
+	result, err := g.keySvc.GetKey(r.Context(), tenantID, r.PathValue("key_id"))
 	if err != nil {
 		writeServiceError(w, err)
 		return
