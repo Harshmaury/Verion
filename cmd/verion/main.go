@@ -99,7 +99,9 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("✓ webauthn service ready")
+
 	wauthnHandler := transporthttp.NewWebAuthnHandler(wauthnSvc)
+	loginHandler  := transporthttp.NewLoginHandler(wauthnSvc)
 
 	// ── 8. gRPC server ────────────────────────────────────────────────────────
 	grpcSrv := grpctransport.New(identitySvc, tenantSvc, keySvc)
@@ -119,7 +121,7 @@ func main() {
 	}()
 
 	// ── 9. HTTP gateway ───────────────────────────────────────────────────────
-	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc, wauthnHandler)
+	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc, wauthnHandler, loginHandler)
 
 	go func() {
 		slog.Info("HTTP gateway listening", "addr", httpAddr)

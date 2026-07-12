@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -17,6 +18,11 @@ import (
 )
 
 const challengeTTL = 5 * time.Minute
+
+// ErrCloneDetected is returned when the WebAuthn sign count indicates
+// the authenticator may have been cloned.
+// This is a high-severity security event.
+var ErrCloneDetected = errors.New("auth: authenticator clone detected — sign count regression")
 
 // WebAuthnConfig holds configuration for the WebAuthn relying party.
 type WebAuthnConfig struct {
@@ -59,44 +65,38 @@ func New(
 	}, nil
 }
 
+// ── Registration ──────────────────────────────────────────────────────────────
+
 // BeginRegistration starts the WebAuthn registration ceremony.
-// Returns CredentialCreationOptions and a session ID to be sent to the client.
 func (s *WebAuthnService) BeginRegistration(
 	ctx context.Context,
 	tenantID string,
 	identityID string,
 ) (*protocol.CredentialCreation, string, error) {
-	// Step 1 — Load identity.
 	id, err := s.identitySvc.GetIdentity(ctx, tenantID, identityID)
 	if err != nil {
 		return nil, "", fmt.Errorf("webauthn: begin registration: %w", err)
 	}
-
-	// Step 2 — Verify active.
 	if !id.IsActive() {
 		return nil, "", identity.ErrIdentityInactive
 	}
 
-	// Step 3 — Build user adapter with existing credentials for exclusion list.
 	existingCreds, err := s.repos.Credentials.ListByIdentity(ctx, tenantID, identityID, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("webauthn: list existing credentials: %w", err)
 	}
 	user := newVerionUser(id, existingCreds)
 
-	// Step 4 — Call library BeginRegistration.
 	creation, session, err := s.wauthn.BeginRegistration(user)
 	if err != nil {
 		return nil, "", fmt.Errorf("webauthn: begin registration: %w", err)
 	}
 
-	// Step 5 — Marshal session data to JSON.
 	sessionBytes, err := json.Marshal(session)
 	if err != nil {
 		return nil, "", fmt.Errorf("webauthn: marshal session: %w", err)
 	}
 
-	// Step 6 — Generate session ID and store in Redis with 5-minute TTL.
 	sessionID, err := generateSessionID()
 	if err != nil {
 		return nil, "", fmt.Errorf("webauthn: generate session id: %w", err)
@@ -116,38 +116,32 @@ func (s *WebAuthnService) FinishRegistration(
 	sessionID string,
 	r *http.Request,
 ) (*identity.Credential, error) {
-	// Step 1 — Load identity.
 	id, err := s.identitySvc.GetIdentity(ctx, tenantID, identityID)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: finish: load identity: %w", err)
 	}
 
-	// Step 2 — Build user adapter.
 	existingCreds, err := s.repos.Credentials.ListByIdentity(ctx, tenantID, identityID, nil)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: finish: list credentials: %w", err)
 	}
 	user := newVerionUser(id, existingCreds)
 
-	// Step 3 — Retrieve and atomically delete session (GETDEL — single use).
 	sessionBytes, err := s.store.GetChallenge(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: finish: get challenge: %w", err)
 	}
 
-	// Step 4 — Unmarshal session data.
 	var session webauthn.SessionData
 	if err := json.Unmarshal(sessionBytes, &session); err != nil {
 		return nil, fmt.Errorf("webauthn: finish: unmarshal session: %w", err)
 	}
 
-	// Step 5 — Verify: challenge matches, signature valid, origin correct.
 	credential, err := s.wauthn.FinishRegistration(user, session, r)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: finish: verification failed: %w", err)
 	}
 
-	// Steps 6-9 — Extract public key, compute fingerprint.
 	pubKeyBytes := credential.PublicKey
 	sum := sha256.Sum256(pubKeyBytes)
 	fingerprint := fmt.Sprintf("%x", sum)
@@ -163,20 +157,17 @@ func (s *WebAuthnService) FinishRegistration(
 		Status:      identity.KeyStatusActive,
 	}
 
-	// Step 10 — Persist public key record.
 	createdKey, err := s.repos.Keys.Create(ctx, keyRecord)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: finish: create key record: %w", err)
 	}
 
-	// Step 11 — Set primary key if identity has none.
 	if id.PrimaryKeyID == nil {
 		if err := s.repos.Identities.SetPrimaryKey(ctx, tenantID, identityID, createdKey.ID); err != nil {
 			return nil, fmt.Errorf("webauthn: finish: set primary key: %w", err)
 		}
 	}
 
-	// Step 12 — Build and store credential record.
 	aaguid := fmt.Sprintf("%x", credential.Authenticator.AAGUID)
 	credName := "Passkey"
 	cred := &identity.Credential{
@@ -185,6 +176,7 @@ func (s *WebAuthnService) FinishRegistration(
 		KeyID:        &createdKey.ID,
 		Type:         identity.CredentialTypePasskey,
 		Status:       identity.CredentialStatusActive,
+		Data:         pubKeyBytes, // COSE public key for assertion verification
 		CredentialID: credential.ID,
 		SignCount:    int64(credential.Authenticator.SignCount),
 		AAGUID:       &aaguid,
@@ -196,7 +188,6 @@ func (s *WebAuthnService) FinishRegistration(
 		return nil, fmt.Errorf("webauthn: finish: create credential: %w", err)
 	}
 
-	// Step 13 — Write audit event.
 	actor := identityID
 	if err := s.repos.Audit.Insert(ctx, &identity.AuditEvent{
 		TenantID:   tenantID,
@@ -209,8 +200,194 @@ func (s *WebAuthnService) FinishRegistration(
 		return nil, fmt.Errorf("webauthn: finish: write audit event: %w", err)
 	}
 
-	// Step 14 — Return stored credential.
 	return createdCred, nil
+}
+
+// ── Assertion ─────────────────────────────────────────────────────────────────
+
+// BeginAssertion starts the WebAuthn assertion (login) ceremony.
+func (s *WebAuthnService) BeginAssertion(
+	ctx context.Context,
+	tenantID string,
+	handle string,
+) (*protocol.CredentialAssertion, string, error) {
+	// Step 1 — Load identity by handle.
+	id, err := s.identitySvc.GetIdentityByHandle(ctx, tenantID, handle)
+	if err != nil {
+		return nil, "", fmt.Errorf("webauthn: begin assertion: %w", err)
+	}
+
+	// Step 2 — Verify active.
+	if !id.IsActive() {
+		return nil, "", identity.ErrIdentityInactive
+	}
+
+	// Step 3 — Load active passkey credentials.
+	activeStatus := identity.CredentialStatusActive
+	allCreds, err := s.repos.Credentials.ListByIdentity(ctx, tenantID, id.ID, &activeStatus)
+	if err != nil {
+		return nil, "", fmt.Errorf("webauthn: begin assertion: list credentials: %w", err)
+	}
+
+	// Filter to passkey and hardware token types only.
+	var passkeyCreds []*identity.Credential
+	for _, c := range allCreds {
+		if c.Type == identity.CredentialTypePasskey || c.Type == identity.CredentialTypeHardwareToken {
+			passkeyCreds = append(passkeyCreds, c)
+		}
+	}
+
+	// Step 4 — Build user adapter with credentials.
+	user := newVerionUserWithCreds(id, passkeyCreds)
+
+	// Step 5 — Begin login.
+	var assertion *protocol.CredentialAssertion
+	var session *webauthn.SessionData
+
+	if len(passkeyCreds) == 0 {
+		assertion, session, err = s.wauthn.BeginDiscoverableLogin()
+	} else {
+		assertion, session, err = s.wauthn.BeginLogin(user)
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("webauthn: begin assertion: %w", err)
+	}
+
+	// Step 6 — Marshal session data.
+	sessionBytes, err := json.Marshal(session)
+	if err != nil {
+		return nil, "", fmt.Errorf("webauthn: begin assertion: marshal session: %w", err)
+	}
+
+	// Step 7 — Generate session ID and store in Redis.
+	sessionID, err := generateSessionID()
+	if err != nil {
+		return nil, "", fmt.Errorf("webauthn: begin assertion: generate session id: %w", err)
+	}
+	if err := s.store.SetChallenge(ctx, sessionID, sessionBytes, challengeTTL); err != nil {
+		return nil, "", fmt.Errorf("webauthn: begin assertion: store challenge: %w", err)
+	}
+
+	// Step 8 — Return assertion options and session ID.
+	return assertion, sessionID, nil
+}
+
+// FinishAssertion completes the WebAuthn assertion ceremony.
+func (s *WebAuthnService) FinishAssertion(
+	ctx context.Context,
+	tenantID string,
+	handle string,
+	sessionID string,
+	r *http.Request,
+) (*identity.Identity, error) {
+	// Step 1 — Load identity by handle.
+	id, err := s.identitySvc.GetIdentityByHandle(ctx, tenantID, handle)
+	if err != nil {
+		return nil, fmt.Errorf("webauthn: finish assertion: %w", err)
+	}
+
+	// Step 2 — Verify active.
+	if !id.IsActive() {
+		return nil, identity.ErrIdentityInactive
+	}
+
+	// Step 3 — Load active WebAuthn credentials.
+	activeStatus := identity.CredentialStatusActive
+	allCreds, err := s.repos.Credentials.ListByIdentity(ctx, tenantID, id.ID, &activeStatus)
+	if err != nil {
+		return nil, fmt.Errorf("webauthn: finish assertion: list credentials: %w", err)
+	}
+	var passkeyCreds []*identity.Credential
+	for _, c := range allCreds {
+		if c.Type == identity.CredentialTypePasskey || c.Type == identity.CredentialTypeHardwareToken {
+			passkeyCreds = append(passkeyCreds, c)
+		}
+	}
+
+	// Step 4 — Build user adapter.
+	user := newVerionUserWithCreds(id, passkeyCreds)
+
+	// Step 5 — Retrieve and consume session (GETDEL — single use).
+	sessionBytes, err := s.store.GetChallenge(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("webauthn: finish assertion: get challenge: %w", err)
+	}
+
+	// Step 6 — Unmarshal session data.
+	var session webauthn.SessionData
+	if err := json.Unmarshal(sessionBytes, &session); err != nil {
+		return nil, fmt.Errorf("webauthn: finish assertion: unmarshal session: %w", err)
+	}
+
+	// Step 7 — Verify signature, challenge, origin.
+	credential, err := s.wauthn.FinishLogin(user, session, r)
+	if err != nil {
+		// Write auth failure audit event.
+		actor := id.ID
+		_ = s.repos.Audit.Insert(ctx, &identity.AuditEvent{
+			TenantID:   tenantID,
+			EventType:  identity.AuditEventAuthFailure,
+			EntityType: "identity",
+			EntityID:   id.ID,
+			ActorID:    &actor,
+			Success:    false,
+		})
+		return nil, fmt.Errorf("webauthn: finish assertion: verification failed: %w", err)
+	}
+
+	// Step 8 — Sign count check (clone detection).
+	// Find the matching stored credential by credential ID.
+	var storedCred *identity.Credential
+	for _, c := range passkeyCreds {
+		if string(c.CredentialID) == string(credential.ID) {
+			storedCred = c
+			break
+		}
+	}
+
+	if storedCred != nil {
+		newCount := credential.Authenticator.SignCount
+		storedCount := uint32(storedCred.SignCount)
+		// Skip check if authenticator doesn't support counters (returns 0).
+		if newCount != 0 && newCount <= storedCount {
+			actor := id.ID
+			_ = s.repos.Audit.Insert(ctx, &identity.AuditEvent{
+				TenantID:   tenantID,
+				EventType:  identity.AuditEventAuthFailure,
+				EntityType: "identity",
+				EntityID:   id.ID,
+				ActorID:    &actor,
+				Success:    false,
+			})
+			return nil, ErrCloneDetected
+		}
+
+		// Step 9 — Update sign count.
+		if err := s.repos.Credentials.UpdateSignCount(ctx, tenantID, storedCred.ID, int64(newCount)); err != nil {
+			return nil, fmt.Errorf("webauthn: finish assertion: update sign count: %w", err)
+		}
+
+		// Step 10 — Update last used.
+		if err := s.repos.Credentials.UpdateLastUsed(ctx, tenantID, storedCred.ID, time.Now()); err != nil {
+			return nil, fmt.Errorf("webauthn: finish assertion: update last used: %w", err)
+		}
+	}
+
+	// Step 11 — Write auth success audit event.
+	actor := id.ID
+	if err := s.repos.Audit.Insert(ctx, &identity.AuditEvent{
+		TenantID:   tenantID,
+		EventType:  identity.AuditEventAuthSuccess,
+		EntityType: "identity",
+		EntityID:   id.ID,
+		ActorID:    &actor,
+		Success:    true,
+	}); err != nil {
+		return nil, fmt.Errorf("webauthn: finish assertion: write audit event: %w", err)
+	}
+
+	// Step 12 — Return authenticated identity.
+	return id, nil
 }
 
 // ── WebAuthn User adapter ─────────────────────────────────────────────────────
@@ -220,10 +397,10 @@ type verionUser struct {
 	credentials []webauthn.Credential
 }
 
+// newVerionUser builds a user adapter with credential IDs only (for registration exclusion list).
 func newVerionUser(id *identity.Identity, existingCreds []*identity.Credential) *verionUser {
 	waCreds := make([]webauthn.Credential, 0, len(existingCreds))
 	for _, c := range existingCreds {
-		// Populate credential ID for exclusion list during registration.
 		waCreds = append(waCreds, webauthn.Credential{
 			ID: c.CredentialID,
 		})
@@ -231,16 +408,38 @@ func newVerionUser(id *identity.Identity, existingCreds []*identity.Credential) 
 	return &verionUser{id: id, credentials: waCreds}
 }
 
-func (u *verionUser) WebAuthnID() []byte                        { return []byte(u.id.ID) }
-func (u *verionUser) WebAuthnName() string                      { return u.id.Handle }
-func (u *verionUser) WebAuthnDisplayName() string               { return u.id.DisplayName }
+// newVerionUserWithCreds builds a user adapter with full credential data (for assertion).
+func newVerionUserWithCreds(id *identity.Identity, creds []*identity.Credential) *verionUser {
+	waCreds := make([]webauthn.Credential, 0, len(creds))
+	for _, c := range creds {
+		waCreds = append(waCreds, domainCredToWebAuthn(c))
+	}
+	return &verionUser{id: id, credentials: waCreds}
+}
+
+// domainCredToWebAuthn converts a Verion Credential to webauthn.Credential.
+// The credential's Data field contains the COSE-encoded public key
+// stored during FinishRegistration.
+func domainCredToWebAuthn(c *identity.Credential) webauthn.Credential {
+	return webauthn.Credential{
+		ID:              c.CredentialID,
+		PublicKey:       c.Data, // COSE public key stored in Data field
+		AttestationType: "none",
+		Authenticator: webauthn.Authenticator{
+			AAGUID:    []byte{},
+			SignCount: uint32(c.SignCount),
+		},
+	}
+}
+
+func (u *verionUser) WebAuthnID() []byte                         { return []byte(u.id.ID) }
+func (u *verionUser) WebAuthnName() string                       { return u.id.Handle }
+func (u *verionUser) WebAuthnDisplayName() string                { return u.id.DisplayName }
 func (u *verionUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
-func (u *verionUser) WebAuthnIcon() string                      { return "" } // deprecated in spec
+func (u *verionUser) WebAuthnIcon() string                       { return "" }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// generateSessionID returns a 32-char hex string from 16 random bytes.
-// Uses crypto/rand — not sequential.
 func generateSessionID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

@@ -17,6 +17,7 @@ type Gateway struct {
 	tenantSvc   identity.TenantService
 	keySvc      identity.KeyService
 	wauthn      *WebAuthnHandler
+	login       *LoginHandler
 }
 
 // New creates a Gateway, registers all routes, applies middleware stack.
@@ -26,12 +27,14 @@ func New(
 	tenantSvc identity.TenantService,
 	keySvc identity.KeyService,
 	wauthn *WebAuthnHandler,
+	login *LoginHandler,
 ) *Gateway {
 	g := &Gateway{
 		identitySvc: identitySvc,
 		tenantSvc:   tenantSvc,
 		keySvc:      keySvc,
 		wauthn:      wauthn,
+		login:       login,
 	}
 
 	mux := http.NewServeMux()

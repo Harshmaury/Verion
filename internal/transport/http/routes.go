@@ -16,6 +16,10 @@ func (g *Gateway) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/auth/register", g.wauthn.RegisterBegin)
 	mux.HandleFunc("POST /v1/auth/register/complete", g.wauthn.RegisterComplete)
 
+	// WebAuthn assertion (login)
+	mux.HandleFunc("POST /v1/auth/login", g.login.LoginBegin)
+	mux.HandleFunc("POST /v1/auth/login/complete", g.login.LoginComplete)
+
 	// Tenant routes
 	mux.HandleFunc("POST /v1/tenants", g.handleCreateTenant)
 	mux.HandleFunc("GET /v1/tenants/{id}", g.handleGetTenant)
