@@ -87,13 +87,22 @@ func main() {
 	defer redisStore.Close()
 	slog.Info("✓ redis connected")
 
-	// ── 7. WebAuthn ───────────────────────────────────────────────────────────
+	// ── 7. Token service ──────────────────────────────────────────────────────
+	tokenCfg := auth.DefaultTokenConfig()
+	tokenSvc, err := auth.NewTokenService(tokenCfg)
+	if err != nil {
+		slog.Error("token service init failed", "err", err)
+		os.Exit(1)
+	}
+	slog.Info("✓ token service ready")
+
+	// ── 8. WebAuthn ───────────────────────────────────────────────────────────
 	wauthnCfg := auth.WebAuthnConfig{
 		RPID:          envOrDefault("VERION_WEBAUTHN_RPID", "localhost"),
 		RPDisplayName: envOrDefault("VERION_WEBAUTHN_DISPLAY_NAME", "Verion"),
 		RPOrigins:     []string{envOrDefault("VERION_WEBAUTHN_ORIGIN", "http://localhost:8080")},
 	}
-	wauthnSvc, err := auth.New(wauthnCfg, redisStore, identitySvc, keySvc, &repos)
+	wauthnSvc, err := auth.New(wauthnCfg, redisStore, identitySvc, keySvc, &repos, tokenSvc)
 	if err != nil {
 		slog.Error("webauthn init failed", "err", err)
 		os.Exit(1)
@@ -103,7 +112,7 @@ func main() {
 	wauthnHandler := transporthttp.NewWebAuthnHandler(wauthnSvc)
 	loginHandler  := transporthttp.NewLoginHandler(wauthnSvc)
 
-	// ── 8. gRPC server ────────────────────────────────────────────────────────
+	// ── 9. gRPC server ────────────────────────────────────────────────────────
 	grpcSrv := grpctransport.New(identitySvc, tenantSvc, keySvc)
 	lis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
@@ -120,8 +129,8 @@ func main() {
 		}
 	}()
 
-	// ── 9. HTTP gateway ───────────────────────────────────────────────────────
-	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc, wauthnHandler, loginHandler)
+	// ── 10. HTTP gateway ──────────────────────────────────────────────────────
+	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc, tokenSvc, wauthnHandler, loginHandler)
 
 	go func() {
 		slog.Info("HTTP gateway listening", "addr", httpAddr)
@@ -130,7 +139,7 @@ func main() {
 		}
 	}()
 
-	// ── 10. Graceful shutdown ─────────────────────────────────────────────────
+	// ── 11. Graceful shutdown ─────────────────────────────────────────────────
 	<-quit
 	slog.Info("shutdown signal received — draining...")
 

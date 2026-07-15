@@ -18,9 +18,6 @@ func NewWebAuthnHandler(svc *auth.WebAuthnService) *WebAuthnHandler {
 }
 
 // RegisterBegin handles POST /v1/auth/register
-// Request body: { "tenant_id": "...", "identity_id": "..." }
-// Response: WebAuthn CredentialCreationOptions JSON
-// Response header: X-Session-ID — must be included in RegisterComplete
 func (h *WebAuthnHandler) RegisterBegin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TenantID   string `json:"tenant_id"`
@@ -46,28 +43,27 @@ func (h *WebAuthnHandler) RegisterBegin(w http.ResponseWriter, r *http.Request) 
 }
 
 // RegisterComplete handles POST /v1/auth/register/complete
-// Required headers: X-Tenant-ID, X-Identity-ID, X-Session-ID
-// Request body: WebAuthn AuthenticatorAttestationResponse
-// Response: { "credential_id": "...", "type": "passkey", "created_at": "..." }
+// Returns credential info plus JWT token.
 func (h *WebAuthnHandler) RegisterComplete(w http.ResponseWriter, r *http.Request) {
-	tenantID   := r.Header.Get("X-Tenant-ID")
+	tenantID  := r.Header.Get("X-Tenant-ID")
 	identityID := r.Header.Get("X-Identity-ID")
-	sessionID  := r.Header.Get("X-Session-ID")
+	sessionID := r.Header.Get("X-Session-ID")
 
 	if tenantID == "" || identityID == "" || sessionID == "" {
 		writeError(w, http.StatusBadRequest, "X-Tenant-ID, X-Identity-ID, and X-Session-ID headers are required")
 		return
 	}
 
-	cred, err := h.svc.FinishRegistration(r.Context(), tenantID, identityID, sessionID, r)
+	result, err := h.svc.FinishRegistration(r.Context(), tenantID, identityID, sessionID, r)
 	if err != nil {
 		writeServiceError(w, err)
 		return
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"credential_id": cred.ID,
-		"type":          string(cred.Type),
-		"created_at":    cred.CreatedAt,
+		"credential_id": result.Credential.ID,
+		"type":          string(result.Credential.Type),
+		"created_at":    result.Credential.CreatedAt,
+		"token":         result.Token,
 	})
 }

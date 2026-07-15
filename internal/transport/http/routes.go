@@ -7,40 +7,42 @@ import (
 	"github.com/Harshmaury/verion/internal/identity"
 )
 
-// registerRoutes registers all REST routes on the provided mux.
+// registerRoutes registers all REST routes.
+// Protected routes are wrapped with RequireAuth middleware.
+// Public routes are left unwrapped.
 func (g *Gateway) registerRoutes(mux *http.ServeMux) {
-	// Health
+	auth := RequireAuth(g.tokenSvc)
+
+	// ── Public routes ─────────────────────────────────────────────────────────
 	mux.HandleFunc("GET /healthz", g.handleHealthz)
 
-	// WebAuthn registration
+	// WebAuthn — always public
 	mux.HandleFunc("POST /v1/auth/register", g.wauthn.RegisterBegin)
 	mux.HandleFunc("POST /v1/auth/register/complete", g.wauthn.RegisterComplete)
-
-	// WebAuthn assertion (login)
 	mux.HandleFunc("POST /v1/auth/login", g.login.LoginBegin)
 	mux.HandleFunc("POST /v1/auth/login/complete", g.login.LoginComplete)
 
-	// Tenant routes
+	// Create tenant — public (admin auth added in Phase 4)
 	mux.HandleFunc("POST /v1/tenants", g.handleCreateTenant)
-	mux.HandleFunc("GET /v1/tenants/{id}", g.handleGetTenant)
-	mux.HandleFunc("POST /v1/tenants/{id}/suspend", g.handleSuspendTenant)
-	mux.HandleFunc("POST /v1/tenants/{id}/activate", g.handleActivateTenant)
 
-	// Identity routes
-	mux.HandleFunc("POST /v1/identities", g.handleCreateIdentity)
-	mux.HandleFunc("GET /v1/identities/{id}", g.handleGetIdentity)
-	mux.HandleFunc("GET /v1/identities/handle/{handle}", g.handleGetByHandle)
-	mux.HandleFunc("GET /v1/identities", g.handleListIdentities)
-	mux.HandleFunc("PUT /v1/identities/{id}", g.handleUpdateIdentity)
-	mux.HandleFunc("POST /v1/identities/{id}/suspend", g.handleSuspendIdentity)
-	mux.HandleFunc("POST /v1/identities/{id}/reactivate", g.handleReactivateIdentity)
-	mux.HandleFunc("DELETE /v1/identities/{id}", g.handleDeactivateIdentity)
+	// ── Protected routes ──────────────────────────────────────────────────────
+	mux.Handle("GET /v1/tenants/{id}", auth(http.HandlerFunc(g.handleGetTenant)))
+	mux.Handle("POST /v1/tenants/{id}/suspend", auth(http.HandlerFunc(g.handleSuspendTenant)))
+	mux.Handle("POST /v1/tenants/{id}/activate", auth(http.HandlerFunc(g.handleActivateTenant)))
 
-	// Key routes
-	mux.HandleFunc("POST /v1/keys", g.handleGenerateKey)
-	mux.HandleFunc("GET /v1/keys/{key_id}", g.handleGetKey)
-	mux.HandleFunc("POST /v1/keys/{key_id}/rotate", g.handleRotateKey)
-	mux.HandleFunc("DELETE /v1/keys/{key_id}", g.handleRevokeKey)
+	mux.Handle("POST /v1/identities", auth(http.HandlerFunc(g.handleCreateIdentity)))
+	mux.Handle("GET /v1/identities/{id}", auth(http.HandlerFunc(g.handleGetIdentity)))
+	mux.Handle("GET /v1/identities/handle/{handle}", auth(http.HandlerFunc(g.handleGetByHandle)))
+	mux.Handle("GET /v1/identities", auth(http.HandlerFunc(g.handleListIdentities)))
+	mux.Handle("PUT /v1/identities/{id}", auth(http.HandlerFunc(g.handleUpdateIdentity)))
+	mux.Handle("POST /v1/identities/{id}/suspend", auth(http.HandlerFunc(g.handleSuspendIdentity)))
+	mux.Handle("POST /v1/identities/{id}/reactivate", auth(http.HandlerFunc(g.handleReactivateIdentity)))
+	mux.Handle("DELETE /v1/identities/{id}", auth(http.HandlerFunc(g.handleDeactivateIdentity)))
+
+	mux.Handle("POST /v1/keys", auth(http.HandlerFunc(g.handleGenerateKey)))
+	mux.Handle("GET /v1/keys/{key_id}", auth(http.HandlerFunc(g.handleGetKey)))
+	mux.Handle("POST /v1/keys/{key_id}/rotate", auth(http.HandlerFunc(g.handleRotateKey)))
+	mux.Handle("DELETE /v1/keys/{key_id}", auth(http.HandlerFunc(g.handleRevokeKey)))
 }
 
 // ── Health ────────────────────────────────────────────────────────────────────

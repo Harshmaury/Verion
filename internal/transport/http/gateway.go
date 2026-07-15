@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/Harshmaury/verion/internal/auth"
 	"github.com/Harshmaury/verion/internal/identity"
 )
 
@@ -16,6 +17,7 @@ type Gateway struct {
 	identitySvc identity.IdentityService
 	tenantSvc   identity.TenantService
 	keySvc      identity.KeyService
+	tokenSvc    *auth.TokenService
 	wauthn      *WebAuthnHandler
 	login       *LoginHandler
 }
@@ -26,6 +28,7 @@ func New(
 	identitySvc identity.IdentityService,
 	tenantSvc identity.TenantService,
 	keySvc identity.KeyService,
+	tokenSvc *auth.TokenService,
 	wauthn *WebAuthnHandler,
 	login *LoginHandler,
 ) *Gateway {
@@ -33,6 +36,7 @@ func New(
 		identitySvc: identitySvc,
 		tenantSvc:   tenantSvc,
 		keySvc:      keySvc,
+		tokenSvc:    tokenSvc,
 		wauthn:      wauthn,
 		login:       login,
 	}
