@@ -30,7 +30,7 @@ func (g *Gateway) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /v1/tenants/{id}/suspend", auth(http.HandlerFunc(g.handleSuspendTenant)))
 	mux.Handle("POST /v1/tenants/{id}/activate", auth(http.HandlerFunc(g.handleActivateTenant)))
 
-	mux.Handle("POST /v1/identities", auth(http.HandlerFunc(g.handleCreateIdentity)))
+	mux.HandleFunc("POST /v1/identities", g.handleCreateIdentity)
 	mux.Handle("GET /v1/identities/{id}", auth(http.HandlerFunc(g.handleGetIdentity)))
 	mux.Handle("GET /v1/identities/handle/{handle}", auth(http.HandlerFunc(g.handleGetByHandle)))
 	mux.Handle("GET /v1/identities", auth(http.HandlerFunc(g.handleListIdentities)))

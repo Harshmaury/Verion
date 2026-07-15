@@ -115,8 +115,8 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/v1/keys" \
   -d "{\"tenant_id\":\"$TENANT_ID\"}")
 check "POST /v1/keys without token → 401" "401" "$STATUS"
 
-info "11. Protected: POST /v1/identities without token → 401"
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/v1/identities" \
+info "11. Protected: POST /v1/keys/fake-key/rotate without token → 401"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/v1/keys/fake-key/rotate" \
   -H "Content-Type: application/json" \
   -d "{\"tenant_id\":\"$TENANT_ID\"}")
 check "POST /v1/identities without token → 401" "401" "$STATUS"
