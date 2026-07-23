@@ -20,7 +20,6 @@ type RedisStore struct {
 }
 
 // New creates a RedisStore from a Redis URL.
-// URL format: redis://:<password>@<host>:<port>/<db>
 func New(ctx context.Context, redisURL string) (*RedisStore, error) {
 	opts, err := redis.ParseURL(redisURL)
 	if err != nil {
@@ -34,8 +33,12 @@ func New(ctx context.Context, redisURL string) (*RedisStore, error) {
 	return &RedisStore{client: client}, nil
 }
 
+// Client returns the underlying *redis.Client for use by SessionStore.
+func (s *RedisStore) Client() *redis.Client {
+	return s.client
+}
+
 // SetChallenge stores a WebAuthn challenge with TTL.
-// Key format: "webauthn:challenge:<challengeID>"
 func (s *RedisStore) SetChallenge(ctx context.Context, challengeID string, data []byte, ttl time.Duration) error {
 	key := challengeKeyPrefix + challengeID
 	if err := s.client.Set(ctx, key, data, ttl).Err(); err != nil {
@@ -44,9 +47,7 @@ func (s *RedisStore) SetChallenge(ctx context.Context, challengeID string, data 
 	return nil
 }
 
-// GetChallenge retrieves and atomically deletes a challenge (single-use).
-// Uses Redis GETDEL so the challenge cannot be replayed.
-// Returns ErrChallengeNotFound if the key does not exist or was already consumed.
+// GetChallenge retrieves and atomically deletes a challenge (single-use, GETDEL).
 func (s *RedisStore) GetChallenge(ctx context.Context, challengeID string) ([]byte, error) {
 	key := challengeKeyPrefix + challengeID
 	data, err := s.client.GetDel(ctx, key).Bytes()

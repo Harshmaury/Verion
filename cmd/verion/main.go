@@ -26,17 +26,14 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// ── 1. Config ─────────────────────────────────────────────────────────────
 	grpcAddr     := envOrDefault("VERION_GRPC_ADDR", ":50051")
 	httpAddr     := envOrDefault("VERION_HTTP_ADDR", ":8080")
 	masterKeyHex := mustEnv("VERION_MASTER_KEY")
 
 	masterKey, err := decodeHexKey(masterKeyHex)
-	if err != nil {
-		log.Fatalf("VERION_MASTER_KEY: %v", err)
-	}
+	if err != nil { log.Fatalf("VERION_MASTER_KEY: %v", err) }
 
-	// ── 2. Database ───────────────────────────────────────────────────────────
+	// ── Database ──────────────────────────────────────────────────────────────
 	dbCfg := postgres.DefaultConfig()
 	if v := os.Getenv("VERION_DB_HOST");     v != "" { dbCfg.Host = v }
 	if v := os.Getenv("VERION_DB_PORT");     v != "" { if p, e := strconv.Atoi(v); e == nil { dbCfg.Port = p } }
@@ -46,13 +43,11 @@ func main() {
 	if v := os.Getenv("VERION_DB_SSLMODE");  v != "" { dbCfg.SSLMode = v }
 
 	db, err := postgres.New(ctx, dbCfg)
-	if err != nil {
-		log.Fatalf("connect postgres: %v", err)
-	}
+	if err != nil { log.Fatalf("connect postgres: %v", err) }
 	defer db.Close()
 	slog.Info("✓ postgres connected")
 
-	// ── 3. Repositories ───────────────────────────────────────────────────────
+	// ── Repositories ──────────────────────────────────────────────────────────
 	auditRepo      := postgres.NewAuditRepo(db)
 	keyRepo        := postgres.NewKeyRepo(db)
 	tenantRepo     := postgres.NewTenantRepo(db)
@@ -67,57 +62,50 @@ func main() {
 		Audit:       auditRepo,
 	}
 
-	// ── 4. Crypto service ─────────────────────────────────────────────────────
+	// ── Crypto ────────────────────────────────────────────────────────────────
 	keyStore  := local.New()
 	cryptoCfg := crypto.DefaultConfig(masterKey)
 	cryptoSvc := crypto.New(cryptoCfg, keyStore)
 	slog.Info("✓ crypto service ready (local keystore — dev only)")
 
-	// ── 5. Service layer ──────────────────────────────────────────────────────
+	// ── Services ──────────────────────────────────────────────────────────────
 	tenantSvc   := identity.NewTenantService(&repos)
 	identitySvc := identity.NewIdentityService(&repos, cryptoSvc)
 	keySvc      := identity.NewKeyService(&repos, cryptoSvc)
 
-	// ── 6. Redis ──────────────────────────────────────────────────────────────
+	// ── Redis ─────────────────────────────────────────────────────────────────
 	redisStore, err := store.New(ctx, envOrDefault("VERION_REDIS_URL", "redis://:verion_redis_secret@localhost:6379/0"))
-	if err != nil {
-		slog.Error("redis connection failed", "err", err)
-		os.Exit(1)
-	}
+	if err != nil { slog.Error("redis connection failed", "err", err); os.Exit(1) }
 	defer redisStore.Close()
 	slog.Info("✓ redis connected")
 
-	// ── 7. Token service ──────────────────────────────────────────────────────
-	tokenCfg := auth.DefaultTokenConfig()
-	tokenSvc, err := auth.NewTokenService(tokenCfg)
-	if err != nil {
-		slog.Error("token service init failed", "err", err)
-		os.Exit(1)
-	}
+	// ── Session store ─────────────────────────────────────────────────────────
+	sessionStore := store.NewSessionStore(redisStore.Client(), 24*time.Hour)
+	slog.Info("✓ session store ready")
+
+	// ── Token service ─────────────────────────────────────────────────────────
+	tokenSvc, err := auth.NewTokenService(auth.DefaultTokenConfig())
+	if err != nil { slog.Error("token service init failed", "err", err); os.Exit(1) }
 	slog.Info("✓ token service ready")
 
-	// ── 8. WebAuthn ───────────────────────────────────────────────────────────
+	// ── WebAuthn ──────────────────────────────────────────────────────────────
 	wauthnCfg := auth.WebAuthnConfig{
 		RPID:          envOrDefault("VERION_WEBAUTHN_RPID", "localhost"),
 		RPDisplayName: envOrDefault("VERION_WEBAUTHN_DISPLAY_NAME", "Verion"),
 		RPOrigins:     []string{envOrDefault("VERION_WEBAUTHN_ORIGIN", "http://localhost:8080")},
 	}
-	wauthnSvc, err := auth.New(wauthnCfg, redisStore, identitySvc, keySvc, &repos, tokenSvc)
-	if err != nil {
-		slog.Error("webauthn init failed", "err", err)
-		os.Exit(1)
-	}
+	wauthnSvc, err := auth.New(wauthnCfg, redisStore, identitySvc, keySvc, &repos)
+	if err != nil { slog.Error("webauthn init failed", "err", err); os.Exit(1) }
 	slog.Info("✓ webauthn service ready")
 
-	wauthnHandler := transporthttp.NewWebAuthnHandler(wauthnSvc)
-	loginHandler  := transporthttp.NewLoginHandler(wauthnSvc)
+	wauthnHandler  := transporthttp.NewWebAuthnHandler(wauthnSvc, tokenSvc, sessionStore)
+	loginHandler   := transporthttp.NewLoginHandler(wauthnSvc, tokenSvc, sessionStore)
+	sessionHandler := transporthttp.NewSessionHandler(sessionStore)
 
-	// ── 9. gRPC server ────────────────────────────────────────────────────────
+	// ── gRPC ──────────────────────────────────────────────────────────────────
 	grpcSrv := grpctransport.New(identitySvc, tenantSvc, keySvc)
 	lis, err := net.Listen("tcp", grpcAddr)
-	if err != nil {
-		log.Fatalf("listen %s: %v", grpcAddr, err)
-	}
+	if err != nil { log.Fatalf("listen %s: %v", grpcAddr, err) }
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -129,8 +117,9 @@ func main() {
 		}
 	}()
 
-	// ── 10. HTTP gateway ──────────────────────────────────────────────────────
-	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc, tokenSvc, wauthnHandler, loginHandler)
+	// ── HTTP gateway ──────────────────────────────────────────────────────────
+	gw := transporthttp.New(httpAddr, identitySvc, tenantSvc, keySvc,
+		tokenSvc, sessionStore, wauthnHandler, loginHandler, sessionHandler)
 
 	go func() {
 		slog.Info("HTTP gateway listening", "addr", httpAddr)
@@ -139,13 +128,11 @@ func main() {
 		}
 	}()
 
-	// ── 11. Graceful shutdown ─────────────────────────────────────────────────
+	// ── Graceful shutdown ─────────────────────────────────────────────────────
 	<-quit
 	slog.Info("shutdown signal received — draining...")
-
 	shutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	if err := gw.Shutdown(shutCtx); err != nil {
 		slog.Error("HTTP gateway shutdown error", "err", err)
 	}
@@ -156,16 +143,12 @@ func main() {
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("required environment variable %s is not set", key)
-	}
+	if v == "" { log.Fatalf("required environment variable %s is not set", key) }
 	return v
 }
 
 func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
+	if v := os.Getenv(key); v != "" { return v }
 	return def
 }
 
@@ -187,12 +170,9 @@ func decodeHexKey(hex string) ([]byte, error) {
 
 func hexNibble(c byte) int {
 	switch {
-	case c >= '0' && c <= '9':
-		return int(c - '0')
-	case c >= 'a' && c <= 'f':
-		return int(c-'a') + 10
-	case c >= 'A' && c <= 'F':
-		return int(c-'A') + 10
+	case c >= '0' && c <= '9': return int(c - '0')
+	case c >= 'a' && c <= 'f': return int(c-'a') + 10
+	case c >= 'A' && c <= 'F': return int(c-'A') + 10
 	}
 	return -1
 }
